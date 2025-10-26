@@ -144,73 +144,58 @@ def main() -> int:
 
     Returns an exit code suitable for `sys.exit`.
     """
+    exit_code = 0
     parser = argparse.ArgumentParser(description='Simple DDNS updater for Cloudflare')
     parser.add_argument('--zone', '-z', help='Cloudflare zone name (e.g. example.com)')
     parser.add_argument('--name', '-n', help='DNS record name to update (e.g. host.example.com)')
     args = parser.parse_args()
 
-    # Determine zone and dns name: CLI args preferred, then environment variables
-    zone_name = args.zone or os.getenv('DDNS_ZONE_NAME')
-    dns_name = args.name or os.getenv('DDNS_DNS_NAME')
-
-    exit_code = 0
-
-    if not CLOUDFLARE_API_TOKEN:
-        logger.error('CLOUDFLARE_API_TOKEN not set')
-        return 2
-
-    if not zone_name or not dns_name:
-        logger.error('Zone and DNS name must be provided')
-        return 6
-
     try:
+        # Determine zone and dns name: CLI args preferred, then environment variables
+        zone_name = args.zone or os.getenv('DDNS_ZONE_NAME')
+        dns_name = args.name or os.getenv('DDNS_DNS_NAME')
+
+        # --- Validation Guard Clauses ---
+        if not CLOUDFLARE_API_TOKEN:
+            logger.error('CLOUDFLARE_API_TOKEN not set')
+            exit_code = 2
+            return exit_code
+
+        if not zone_name or not dns_name:
+            logger.error('Zone and DNS name must be provided')
+            exit_code = 6
+            return exit_code
+
         zone_id = get_zone_id(zone_name)
-    except requests.exceptions.RequestException as e:
-        logger.error('Error querying zones: %s', e)
-        return 3
+        if not zone_id:
+            logger.error('Zone not found')
+            exit_code = 4
+            return exit_code
 
-    if not zone_id:
-        logger.error('Zone not found')
-        return 4
-
-    try:
+        # --- Main Logic ---
         records = get_dns_records(zone_id, dns_name, 'A')
-    except requests.exceptions.RequestException as e:
-        logger.error('Error querying DNS records: %s', e)
-        return 5
+        if not records:
+            logger.info('No A record found for %s in zone %s', dns_name, zone_name)
+            return exit_code  # Exit with 0
 
-    new_ip = get_public_ip()
-
-    any_updated = False
-    if not records:
-        logger.info(
-            'No A record found for %s in zone %s',
-            dns_name,
-            zone_name,
-        )
-    else:
+        new_ip = get_public_ip()
+        any_updated = False
         for record in records:
             current = record.get('content')
-            record_name = record.get('name') or dns_name
-            logger.info(
-                'Found record id=%s name=%s current=%s new=%s',
-                record.get('id'),
-                record_name,
-                current,
-                new_ip,
-            )
             if current == new_ip:
                 logger.info('Record %s already up-to-date', record.get('id'))
                 continue
-            update_a_record(
-                zone_id,
-                record['id'],
-                new_ip,
-            )
+
+            logger.info('Updating record id=%s from %s to %s', record.get('id'), current, new_ip)
+            update_a_record(zone_id, record['id'], new_ip)
             any_updated = True
 
-    if not any_updated:
-        logger.info('No records needed update')
+        if not any_updated:
+            logger.info('No records needed update')
+            exit_code = 7  # Special exit code for "up-to-date"
+    except requests.exceptions.RequestException as e:
+        logger.error('A network error occurred: %s', e)
+        exit_code = 3  # Generic network error exit code
 
     return exit_code
 
