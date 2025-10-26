@@ -1,0 +1,8 @@
+venv/
+.env
+ddns.log
+__pycache__/
+DS_Store
+ddns.log
+.ruff_cache/
+.venv/

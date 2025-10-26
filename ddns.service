@@ -1,0 +1,12 @@
+[Unit]
+Description=DDNS updater (Cloudflare)
+After=network.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/ddns
+ExecStart=%h/ddns/run_ddns.sh
+User=%u
+
+[Install]
+WantedBy=multi-user.target

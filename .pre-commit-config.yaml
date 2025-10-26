@@ -1,0 +1,56 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+      - id: check-merge-conflict
+        # - id: check-executables-have-shebang
+
+
+  # Use the official ruff pre-commit mirror (astral-sh). Use ruff-check
+  # which supports --fix; pin to a recent release.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.2
+    hooks:
+      - id: ruff-check
+        name: ruff (auto-fix)
+        args: ["--fix"]
+        files: "\\.py$"
+
+  # Use a local pylint hook that runs the pylint executable from your active
+  # Python environment (system or virtualenv). This avoids pre-commit needing
+  # to fetch and checkout a remote mirrors-pylint tag which can fail in some
+  # environments. If you later want pre-commit to manage pylint, run
+  # `pre-commit autoupdate --repo https://github.com/pre-commit/mirrors-pylint`
+  # locally and update this config with the pinned rev it produces.
+  - repo: local
+    hooks:
+      - id: pylint
+        name: pylint (system)
+        entry: pylint
+        language: system
+        types: [python]
+
+  # ShellCheck pre-commit hook (koalaman). Pin to a branch or tag you prefer.
+  # Pin the koalaman shellcheck pre-commit hook to a concrete tag. If this
+  # rev doesn't exist for you, run `pre-commit autoupdate --repo https://github.com/koalaman/shellcheck-precommit`
+  # locally to find a valid immutable tag and commit the updated rev.
+  - repo: local
+    hooks:
+      - id: shellcheck
+        name: shellcheck (system)
+        entry: shellcheck
+        language: system
+        files: "\\.(sh|bash|ksh)$"
+
+  # NOTE: shellcheck hook removed because mirrors for shellcheck can sometimes
+  # be unavailable in some environments; please install `shellcheck` locally
+  # (brew install shellcheck) and run `shellcheck` in CI if desired.
+
+  # NOTE: pylint and mypy were removed from this default config to avoid
+  # heavy environment setup in `pre-commit` on initial install. If you want
+  # stricter static checks enable them and pin correct `rev` values, e.g.
+  # mirrors-pylint at a valid pylint release.

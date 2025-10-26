@@ -1,0 +1,27 @@
+name: Scheduled DDNS updater
+
+on:
+  schedule:
+    - cron: '*/15 * * * *' # every 15 minutes
+
+jobs:
+  run-ddns:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip requests
+
+      - name: Run DDNS (dry-run unless DDNS_DRY_RUN=0)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          python ddns/ddns.py

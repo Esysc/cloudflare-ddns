@@ -1,0 +1,6 @@
+# Cron example: run every 15 minutes, use lock to avoid overlapping runs
+# Preferred: set CLOUDFLARE_API_TOKEN in the host control panel instead of embedding here.
+*/15 * * * * /usr/bin/flock -n /tmp/ddns-runner.lock /home/youruser/ddns/run_ddns.sh >> /home/youruser/ddns/cron.log 2>&1
+
+# Less secure: pass token inline (not recommended):
+# */15 * * * * /home/youruser/ddns/run_ddns.sh "YOUR_TOKEN_HERE" >> /home/youruser/ddns/cron.log 2>&1
