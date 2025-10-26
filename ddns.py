@@ -158,41 +158,35 @@ def main() -> int:
         # --- Validation Guard Clauses ---
         if not CLOUDFLARE_API_TOKEN:
             logger.error('CLOUDFLARE_API_TOKEN not set')
-            exit_code = 2
-            return exit_code
+            return 2
 
         if not zone_name or not dns_name:
             logger.error('Zone and DNS name must be provided')
-            exit_code = 6
-            return exit_code
+            return 6
 
         zone_id = get_zone_id(zone_name)
         if not zone_id:
             logger.error('Zone not found')
-            exit_code = 4
-            return exit_code
+            return 4
 
         # --- Main Logic ---
         records = get_dns_records(zone_id, dns_name, 'A')
         if not records:
             logger.info('No A record found for %s in zone %s', dns_name, zone_name)
-            return exit_code  # Exit with 0
+            return 0
 
         new_ip = get_public_ip()
         any_updated = False
         for record in records:
-            current = record.get('content')
-            if current == new_ip:
-                logger.info('Record %s already up-to-date', record.get('id'))
+            if record.get('content') == new_ip:
+                logger.info('Record %s already up-to-date - IP: %s', record.get('id'), new_ip)
                 continue
-
-            logger.info('Updating record id=%s from %s to %s', record.get('id'), current, new_ip)
             update_a_record(zone_id, record['id'], new_ip)
             any_updated = True
 
         if not any_updated:
             logger.info('No records needed update')
-            exit_code = 7  # Special exit code for "up-to-date"
+            return 7  # Special exit code for "up-to-date"
     except requests.exceptions.RequestException as e:
         logger.error('A network error occurred: %s', e)
         exit_code = 3  # Generic network error exit code
