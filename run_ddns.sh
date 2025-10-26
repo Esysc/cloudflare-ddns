@@ -250,7 +250,7 @@ if [[ -n "$SMTP_HOST_ARG" && -n "$SMTP_USER_ARG" && -n "$SMTP_PASS_ARG" ]]; then
   fi
 
   # Construct the full email body, including the captured log.
-  NOTIFY_BODY="DDNS update for ${NAME_ARG:-$DDNS_DNS_NAME} finished with exit code $DDNS_EXIT_CODE.\n\n--- Execution Log ---\n$DDNS_OUTPUT"
+  NOTIFY_BODY=$(printf "DDNS update for %s finished with exit code %s.\n\n--- Execution Log ---\n%s" "${NAME_ARG:-$DDNS_DNS_NAME}" "$DDNS_EXIT_CODE" "$DDNS_OUTPUT")
 
   # Use the Apprise CLI to send the notification.
   # Add verbosity (-v) to see connection details and check the exit code.
