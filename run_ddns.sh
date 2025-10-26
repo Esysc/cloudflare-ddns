@@ -25,6 +25,13 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_DIR="$HERE/venv"
 SCRIPT="$HERE/ddns.py"
 
+# --- Log Redirection ---
+# Redirect all stdout and stderr from this script to the log file defined by
+# the DDNS_LOG_FILE environment variable, defaulting to ddns.log.
+# This unifies the shell script's logs with the Python script's logs.
+LOG_FILE="${DDNS_LOG_FILE:-$HERE/ddns.log}"
+exec &>> "$LOG_FILE"
+
 usage() {
   cat <<'USAGE' >&2
 Usage: run_ddns.sh [options]
