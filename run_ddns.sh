@@ -214,6 +214,12 @@ echo "$DDNS_OUTPUT"
 
 echo "DDNS script finished with exit code $DDNS_EXIT_CODE."
 
+# Handle the special exit code for "up-to-date"
+if [ "$DDNS_EXIT_CODE" -eq 7 ]; then
+  echo "IP address is already up-to-date. No notification will be sent."
+  exit 0
+fi
+
 # --- Notification Logic ---
 if [[ -n "$SMTP_HOST_ARG" && -n "$SMTP_USER_ARG" && -n "$SMTP_PASS_ARG" ]]; then
   echo "SMTP parameters provided. Preparing to send notification..."
