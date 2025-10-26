@@ -2,6 +2,10 @@
 set -euo pipefail
 
 # Lightweight runner for ddns.py using a virtual environment located at ./venv
+
+# Ignore SIGHUP (hang-up signal) to prevent the script from being terminated
+# when run from a cron job or other non-interactive shell.
+trap '' HUP
 # Usage examples:
 #   ./run_ddns.sh                          # runs ddns.py (dry-run by default)
 #   ./run_ddns.sh --token <TOKEN>          # pass token on the CLI
@@ -21,6 +25,13 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_DIR="$HERE/venv"
 SCRIPT="$HERE/ddns.py"
 
+# --- Log Redirection ---
+# Redirect all stdout and stderr from this script to the log file defined by
+# the DDNS_LOG_FILE environment variable, defaulting to ddns.log.
+# This unifies the shell script's logs with the Python script's logs.
+LOG_FILE="${DDNS_LOG_FILE:-$HERE/ddns.log}"
+exec > >(tee -a "$LOG_FILE") 2>&1
+
 usage() {
   cat <<'USAGE' >&2
 Usage: run_ddns.sh [--token TOKEN] [--zone ZONE] [--name NAME]
@@ -39,44 +50,56 @@ USAGE
 
 
 # Simple lock to avoid overlapping runs. Uses /tmp so it doesn't require root.
-# We open a file descriptor 9 and flock it. If another process holds the lock,
-# we exit quietly.
-LOCKFILE="/tmp/ddns-runner.lock"
-exec 9>"$LOCKFILE" || exit 1
-if ! flock -n 9 ; then
-  echo "Another instance is running, exiting." >&2
-  exit 0
+if command -v flock >/dev/null 2>&1; then
+  # We open a file descriptor 9 and flock it. If another process holds the lock,
+  # we exit quietly.
+  LOCKFILE="/tmp/ddns-runner.lock"
+  exec 9>"$LOCKFILE" || exit 1
+  if ! flock -n 9 ; then
+    echo "Another instance is running, exiting." >&2
+    exit 0
+  fi
+else
+  echo "Warning: 'flock' command not found. Proceeding without lock. Multiple instances may run." >&2
 fi
 
 TOKEN_ARG=""
 ZONE_ARG=""
 NAME_ARG=""
-POSITIONAL_TOKEN=""
+
+# More robust argument parsing to handle --opt=val and "--opt val" as a single arg
+ARGS=()
+for arg in "$@"; do
+  # If an argument contains a space, split it into two.
+  # This handles cases from cron jobs where "--token value" is a single string.
+  if [[ "$arg" == *" "* ]]; then
+    # Use read -a to robustly split the argument into an array.
+    read -r -a split_arg <<< "$arg"
+    ARGS+=("${split_arg[@]}")
+  else
+    ARGS+=("$arg")
+  fi
+done
+set -- "${ARGS[@]}"
+
 while [ ${#} -gt 0 ]; do
   case "$1" in
-    --token|-t)
-      TOKEN_ARG="$2"; shift 2;;
-    --zone|-z)
-      ZONE_ARG="$2"; shift 2;;
-    --name|-n)
-      NAME_ARG="$2"; shift 2;;
+    --token=*) TOKEN_ARG="${1#*=}"; shift 1;;
+    --token|-t) TOKEN_ARG="$2"; shift 2;;
+    --zone=*) ZONE_ARG="${1#*=}"; shift 1;;
+    --zone|-z) ZONE_ARG="$2"; shift 2;;
+    --name=*) NAME_ARG="${1#*=}"; shift 1;;
+    --name|-n) NAME_ARG="$2"; shift 2;;
     --help|-h)
       usage; exit 0;;
     --*)
       echo "Unknown option: $1" >&2; usage; exit 2;;
     *)
-      if [ -z "$POSITIONAL_TOKEN" ]; then
-        POSITIONAL_TOKEN="$1"
-      else
-        echo "Unexpected positional argument: $1" >&2; usage; exit 2
-      fi
-      shift
+      echo "Unexpected positional argument: $1" >&2; usage; exit 2
       ;;
   esac
 done
 
-# Prefer explicit token flag, then positional, then env
-TOKEN_ARG="${TOKEN_ARG:-$POSITIONAL_TOKEN}"
 if [ -n "$TOKEN_ARG" ]; then
   export CLOUDFLARE_API_TOKEN="$TOKEN_ARG"
 fi
@@ -86,8 +109,8 @@ fi
 TOKEN_FILE="${CLOUDFLARE_TOKEN_FILE:-$HOME/.cloudflare_token}"
 if [ ! -n "${CLOUDFLARE_API_TOKEN:-}" ] && [ -f "$TOKEN_FILE" ]; then
   # warn if permissions are too open
-  perms=$(stat -f "%A" "$TOKEN_FILE" 2>/dev/null || stat -c "%a" "$TOKEN_FILE" 2>/dev/null || echo "600")
-  if [ "$perms" != "600" ]; then
+  perms=$(stat -c "%a" "$TOKEN_FILE" 2>/dev/null || stat -f "%A" "$TOKEN_FILE" 2>/dev/null || echo "???")
+  if [[ "$perms" != "600" && "$perms" != "-rw-------" ]]; then
     echo "Warning: token file $TOKEN_FILE should have permissions 600 (chmod 600)" >&2
   fi
   # read only the first line, trim CR/LF and whitespace

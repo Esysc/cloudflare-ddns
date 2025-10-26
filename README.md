@@ -52,13 +52,11 @@ DDNS_DRY_RUN=0 ./run_ddns.sh --zone example.com --name host.example.com
 Usage and flags
 ---------------
 `run_ddns.sh` accepts these options (and forwards `--zone/--name` to `ddns.py`):
-
 - `--token` / `-t` : Cloudflare API token (fallback: `CLOUDFLARE_API_TOKEN` env)
 - `--zone`  / `-z` : Cloudflare zone name (fallback: `DDNS_ZONE_NAME` env)
 - `--name`  / `-n` : DNS record name to update (fallback: `DDNS_DNS_NAME` env)
 
-If no token is provided via flag or env, the runner will try `~/.cloudflare_token`
-(first line trimmed). `ddns.py` validates presence of token, zone and name.
+The script supports both `--option value` and `--option=value` formats, making it resilient to different shell environments, including restrictive cron job runners.
 
 Examples
 --------
@@ -136,6 +134,3 @@ pre-commit install
 # optionally run against all files once
 pre-commit run --all-files
 ```
-
-If you'd like I can adjust the pre-commit hooks (enable/disable specific
-rules, pin different versions, or add black/isort).
