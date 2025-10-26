@@ -6,7 +6,6 @@ from network operations.
 import os
 import sys
 import unittest
-from importlib import reload
 from unittest.mock import patch
 
 # Add the parent directory to the path to allow importing 'ddns'
@@ -25,9 +24,6 @@ class TestMainLogic(unittest.TestCase):
         os.environ['DDNS_DNS_NAME'] = 'host.example.com'
         # Ensure we are not in dry-run mode for these tests to check update calls
         os.environ['DDNS_DRY_RUN'] = '0'
-        # Reload the module to ensure it picks up the environment variables set in
-        # this setUp method, isolating it from changes made in other test files.
-        reload(ddns)
 
     def tearDown(self):
         """Clean up environment variables after tests."""
@@ -132,7 +128,6 @@ class TestMainLogic(unittest.TestCase):
         # Arrange: Set DDNS_DRY_RUN to '1' to enable dry-run mode.
         # We need to reload the module for the module-level DRY_RUN constant to update.
         os.environ['DDNS_DRY_RUN'] = '1'
-        reload(ddns)
         mock_get_dns_records.return_value = [
             {'id': 'rec-123', 'name': 'host.example.com', 'content': '192.0.2.1'}
         ]
@@ -145,7 +140,3 @@ class TestMainLogic(unittest.TestCase):
         self.assertEqual(exit_code, 0, "Exit code should be 0 for a successful dry-run update.")
         # Verify that the underlying `requests.patch` function was NEVER called.
         mock_requests_patch.assert_not_called()
-
-        # Cleanup: Restore DDNS_DRY_RUN to its original state for other tests
-        os.environ['DDNS_DRY_RUN'] = '0'
-        reload(ddns)
