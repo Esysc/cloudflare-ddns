@@ -194,9 +194,12 @@ fi
 
 echo "Running $SCRIPT ${ARGS[*]}"
 # Capture stdout and stderr from the python script into a variable.
-# We use a temporary variable for the exit code because of the command substitution.
-DDNS_OUTPUT=$(python "$SCRIPT" "${ARGS[@]}" 2>&1 || true)
+# We temporarily disable 'set -e' to capture the python script's real exit code,
+# even if it's non-zero. The `|| true` is no longer needed.
+set +e
+DDNS_OUTPUT=$(python "$SCRIPT" "${ARGS[@]}" 2>&1)
 DDNS_EXIT_CODE=$?
+set -e
 
 # Echo the captured output so it's still visible in the console logs.
 echo "$DDNS_OUTPUT"
