@@ -34,12 +34,17 @@ exec > >(tee -a "$LOG_FILE") 2>&1
 
 usage() {
   cat <<'USAGE' >&2
-Usage: run_ddns.sh [--token TOKEN] [--zone ZONE] [--name NAME]
+Usage: run_ddns.sh [options]
 
-Options:
+DDNS Options:
   --token, -t TOKEN   Cloudflare API token (falls back to CLOUDFLARE_API_TOKEN env)
   --zone,  -z ZONE    Cloudflare zone name (falls back to DDNS_ZONE_NAME env)
   --name,  -n NAME    DNS record name to update (falls back to DDNS_DNS_NAME env)
+
+Notification Options:
+  --smtp HOST         SMTP server for email notifications.
+  --username EMAIL    Username for SMTP authentication.
+  --password PASS     Password for SMTP authentication.
   --help,  -h         Show this help
 
 Examples:
@@ -66,6 +71,9 @@ fi
 TOKEN_ARG=""
 ZONE_ARG=""
 NAME_ARG=""
+SMTP_HOST_ARG=""
+SMTP_USER_ARG=""
+SMTP_PASS_ARG=""
 
 # More robust argument parsing to handle --opt=val and "--opt val" as a single arg
 ARGS=()
@@ -92,6 +100,12 @@ while [ ${#} -gt 0 ]; do
     --name|-n) NAME_ARG="$2"; shift 2;;
     --help|-h)
       usage; exit 0;;
+    --smtp=*) SMTP_HOST_ARG="${1#*=}"; shift 1;;
+    --smtp) SMTP_HOST_ARG="$2"; shift 2;;
+    --username=*) SMTP_USER_ARG="${1#*=}"; shift 1;;
+    --username) SMTP_USER_ARG="$2"; shift 2;;
+    --password=*) SMTP_PASS_ARG="${1#*=}"; shift 1;;
+    --password) SMTP_PASS_ARG="$2"; shift 2;;
     --*)
       echo "Unknown option: $1" >&2; usage; exit 2;;
     *)
@@ -140,7 +154,26 @@ if [ -f "$VENV_DIR/bin/activate" ]; then
 
   # Install/upgrade packages after activation
   python -m pip install --upgrade pip
-  if ! python -c "import requests" >/dev/null 2>&1; then
+
+  # Dynamically check if all packages from requirements.txt are installed.
+  # This is more robust than hardcoding package names.
+  NEEDS_INSTALL=false
+  while IFS= read -r requirement || [ -n "$requirement" ]; do
+    # Skip empty lines and comments
+    [[ -z "$requirement" || "$requirement" =~ ^\s*# ]] && continue
+
+    # Extract package name (part before any version specifier)
+    package_name=$(echo "$requirement" | sed -E 's/[<>=!~].*//')
+
+    # Check if the package can be imported. If not, flag for installation.
+    if ! python -c "import $package_name" >/dev/null 2>&1; then
+      echo "Package '$package_name' not found."
+      NEEDS_INSTALL=true
+      break # No need to check further
+    fi
+  done < "$HERE/requirements.txt"
+
+  if [ "$NEEDS_INSTALL" = true ]; then
     echo "Installing required Python packages into venv..."
     python -m pip install -r "$HERE/requirements.txt"
   fi
@@ -167,4 +200,44 @@ if [ -n "$NAME_ARG" ]; then
 fi
 
 echo "Running $SCRIPT ${ARGS[*]}"
-python "$SCRIPT" "${ARGS[@]}"
+# Capture stdout and stderr from the python script into a variable.
+# We use a temporary variable for the exit code because of the command substitution.
+DDNS_OUTPUT=$(python "$SCRIPT" "${ARGS[@]}" 2>&1)
+DDNS_EXIT_CODE=$?
+
+# Echo the captured output so it's still visible in the console logs.
+echo "$DDNS_OUTPUT"
+
+echo "DDNS script finished with exit code $DDNS_EXIT_CODE."
+
+# --- Notification Logic ---
+if [[ -n "$SMTP_HOST_ARG" && -n "$SMTP_USER_ARG" && -n "$SMTP_PASS_ARG" ]]; then
+  echo "SMTP parameters provided. Preparing to send notification..."
+
+  # Construct the Apprise mailtos:// URL for SMTP with STARTTLS (port 587 is implicit)
+  MAIL_URL="mailtos://${SMTP_USER_ARG}:${SMTP_PASS_ARG}@${SMTP_HOST_ARG}"
+
+  # Check if we are in dry-run mode. The python script defaults to dry-run.
+  # The env var DDNS_DRY_RUN must be '0' or 'false' to disable it.
+  _env_dry=${DDNS_DRY_RUN:-1}
+  if [[ "${_env_dry,,}" == "0" || "${_env_dry,,}" == "false" || "${_env_dry,,}" == "no" ]]; then
+    RUN_MODE="LIVE MODE"
+  else
+    RUN_MODE="DRY RUN"
+  fi
+
+  # Determine notification content based on ddns.py exit code
+  if [ "$DDNS_EXIT_CODE" -eq 0 ]; then
+    NOTIFY_TITLE="✅ DDNS Update Successful ($RUN_MODE)"
+  else
+    NOTIFY_TITLE="❌ DDNS Update Failed ($RUN_MODE)"
+  fi
+
+  # Construct the full email body, including the captured log.
+  NOTIFY_BODY="DDNS update for ${NAME_ARG:-$DDNS_DNS_NAME} finished with exit code $DDNS_EXIT_CODE.\n\n--- Execution Log ---\n$DDNS_OUTPUT"
+
+  # Use the Apprise CLI to send the notification.
+  apprise --title "$NOTIFY_TITLE" --body "$NOTIFY_BODY" "$MAIL_URL"
+else
+  echo "No notification parameters provided. Skipping notification."
+fi
