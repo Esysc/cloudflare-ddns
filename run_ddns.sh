@@ -2,6 +2,10 @@
 set -euo pipefail
 
 # Lightweight runner for ddns.py using a virtual environment located at ./venv
+
+# Ignore SIGHUP (hang-up signal) to prevent the script from being terminated
+# when run from a cron job or other non-interactive shell.
+trap '' HUP
 # Usage examples:
 #   ./run_ddns.sh                          # runs ddns.py (dry-run by default)
 #   ./run_ddns.sh --token <TOKEN>          # pass token on the CLI
