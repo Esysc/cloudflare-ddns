@@ -1,15 +1,16 @@
 # DDNS updater for Cloudflare
 
-This repository contains a small DDNS updater script that updates A records in
-a Cloudflare zone to match the host's public IP address.
+This repository contains a robust DDNS updater script that updates A records
+in a Cloudflare zone to match the host's public IP address. It includes a
+feature-rich runner script with venv management, locking, and email
+notifications.
 
 Rationale
 ---------
-If you host a web server and proxy the site through Cloudflare, DNS records
-point to the server's public IP. When the server IP changes (reboot, DHCP,
-cloud VM migration), DNS can become stale. This script queries the current
-public IP and updates all matching A records for a given name in a Cloudflare
-zone so DNS stays correct.
+When self-hosting services behind Cloudflare, DNS records must point to your
+server's public IP. If this IP changes (e.g., due to a DHCP lease renewal or
+server migration), DNS becomes stale. This script automates the process of
+keeping your Cloudflare DNS records in sync with your dynamic public IP.
 
 Security
 --------
@@ -21,77 +22,96 @@ Security
 Files
 -----
 - `ddns.py` — main Python script (dry-run by default; reads token from env).
-- `run_ddns.sh` — helper that creates/activates a `venv` and runs `ddns.py`.
+- `run_ddns.sh` — Self-contained runner that manages a venv, installs dependencies, handles locking, and sends notifications.
+- `requirements.txt` — Python dependencies (`requests`, `apprise`).
 - `cron.example` — suggested crontab line.
 - `ddns.service` / `ddns.timer` — systemd unit and timer examples.
 
-Quick start
+Quick Start
 -----------
-1. Create a virtual environment and install dependencies:
+The `run_ddns.sh` script is designed to be self-contained. It will automatically
+create a Python virtual environment (`venv`) and install dependencies on its
+first run.
 
-```bash
-cd ddns
-python3 -m venv venv
-venv/bin/python -m pip install --upgrade pip requests
-chmod +x run_ddns.sh
-```
+1.  Make the script executable:
+    ```bash
+    chmod +x run_ddns.sh
+    ```
 
-2. Run the updater (dry-run default):
+2.  Run the updater (this is a **dry-run** by default). Provide your token, zone, and record name.
+    ```bash
+    # Set your token in the environment
+    export CLOUDFLARE_API_TOKEN="<your_scoped_api_token>"
 
-```bash
-export CLOUDFLARE_API_TOKEN="<your_token_here>"
-./run_ddns.sh --zone example.com --name host.example.com
-```
+    # Run the script with your zone and record name
+    ./run_ddns.sh --zone example.com --name host.example.com
+    ```
 
-To perform a real update (be careful):
+3.  To perform a **real update**, set the `DDNS_DRY_RUN` environment variable to `0`.
+    ```bash
+    DDNS_DRY_RUN=0 ./run_ddns.sh --zone example.com --name host.example.com
+    ```
 
-```bash
-DDNS_DRY_RUN=0 ./run_ddns.sh --zone example.com --name host.example.com
-```
-
-Usage and flags
----------------
-`run_ddns.sh` accepts these options (and forwards `--zone/--name` to `ddns.py`):
-- `--token` / `-t` : Cloudflare API token (fallback: `CLOUDFLARE_API_TOKEN` env)
-- `--zone`  / `-z` : Cloudflare zone name (fallback: `DDNS_ZONE_NAME` env)
-- `--name`  / `-n` : DNS record name to update (fallback: `DDNS_DNS_NAME` env)
-
-The script supports both `--option value` and `--option=value` formats, making it resilient to different shell environments, including restrictive cron job runners.
-
-Examples
---------
-
-Using CLI flags (preferred):
-
-```bash
-./run_ddns.sh --token xxxxx --zone example.com --name host.example.com
-```
-
-Using environment variables:
-
-```bash
-DDNS_ZONE_NAME=example.com DDNS_DNS_NAME=host.example.com CLOUDFLARE_API_TOKEN=xxxx ./run_ddns.sh
-```
-
-Backwards compatibility (positional token):
-
-```bash
-./run_ddns.sh xxxxx
-# with env vars for zone/name
-DDNS_ZONE_NAME=example.com DDNS_DNS_NAME=host.example.com ./run_ddns.sh xxxxx
-```
-
-Tests
+Usage
 -----
-There is a small test suite that validates argument/env validation for
-`ddns.py` without making network calls. Run it with:
+The `run_ddns.sh` script accepts the following options. It supports both `--option value` and `--option=value` formats, making it resilient to different shell environments.
 
+#### DDNS Options
+
+| Flag | Environment Variable | Description |
+|---|---|---|
+| `--token, -t` | `CLOUDFLARE_API_TOKEN` | Your Cloudflare API token. |
+| `--zone, -z` | `DDNS_ZONE_NAME` | The Cloudflare zone name (e.g., `example.com`). |
+| `--name, -n` | `DDNS_DNS_NAME` | The DNS record name to update (e.g., `host.example.com`). |
+
+#### Notification Options
+
+| Flag | Description |
+|---|---|
+| `--smtp HOST` | SMTP server for email notifications (e.g., `smtp.example.com:587`). |
+| `--username EMAIL` | Username for SMTP authentication. |
+| `--password PASS` | Password for SMTP authentication (use quotes for special characters). |
+| `--recipient EMAIL` | Recipient's email address (if omitted, defaults to the `--username` email). |
+
+Email Notifications
+-------------------
+The script can send email notifications upon success or failure using Apprise.
+
+**Notifications are sent only when:**
+- A DNS record is successfully updated.
+- An error occurs during the update process.
+
+**No notification is sent if the script runs and finds the IP address is already up-to-date.**
+
+To enable notifications, provide the SMTP server, username, and password.
+
+#### Example with Notifications
 ```bash
-python3 -m unittest discover -v
+DDNS_DRY_RUN=0 ./run_ddns.sh \
+  --zone example.com \
+  --name host.example.com \
+  --smtp smtp.gmail.com:587 \
+  --username my-email@gmail.com \
+  --password "my-app-password" \
+  --recipient notifications@example.com
 ```
+
+Exit Codes
+----------
+The `ddns.py` script returns specific exit codes to indicate the outcome:
+
+| Code | Meaning | Notification Sent? |
+|---|---|---|
+| `0` | Success (record was updated). | Yes (Success) |
+| `2` | Configuration Error (API token missing). | Yes (Failure) |
+| `3` | Network Error (failed to contact Cloudflare or IP service). | Yes (Failure) |
+| `4` | Configuration Error (Zone not found). | Yes (Failure) |
+| `6` | Configuration Error (Zone or DNS name missing). | Yes (Failure) |
+| `7` | No Action Needed (IP address was already up-to-date). | **No** |
 
 Deployment notes
 ----------------
+- The `run_ddns.sh` script will automatically create a `venv` and install dependencies from `requirements.txt` if they are missing.
 - Prefer injecting `CLOUDFLARE_API_TOKEN` from your host's environment/secret
   store rather than embedding it in crontab or files.
 - Use the included `ddns.timer` / `ddns.service` example or `cron.example` to
@@ -99,8 +119,12 @@ Deployment notes
 
 Token file option
 -----------------
-If you store the token on disk (less recommended), create `~/.cloudflare_token`
-with strict permissions and ensure only the first line contains the token:
+As an alternative to the environment variable, `run_ddns.sh` can read the token
+from a file. The script checks these locations in order:
+1. `$CLOUDFLARE_TOKEN_FILE` (if the environment variable is set)
+2. `~/.cloudflare_token`
+
+Create the file with strict permissions:
 
 ```bash
 echo "<your_token>" > ~/.cloudflare_token
