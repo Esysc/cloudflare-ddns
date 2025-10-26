@@ -34,6 +34,7 @@ Notification Options:
   --smtp HOST         SMTP server for email notifications.
   --username EMAIL    Username for SMTP authentication.
   --password PASS     Password for SMTP authentication.
+  --recipient EMAIL   Recipient's email address (defaults to username).
   --help,  -h         Show this help
 
 Examples:
@@ -63,6 +64,7 @@ NAME_ARG=""
 SMTP_HOST_ARG=""
 SMTP_USER_ARG=""
 SMTP_PASS_ARG=""
+RECIPIENT_ARG=""
 
 # More robust argument parsing to handle --opt=val and "--opt val" as a single arg
 ARGS=()
@@ -95,6 +97,8 @@ while [ ${#} -gt 0 ]; do
     --username) SMTP_USER_ARG="$2"; shift 2;;
     --password=*) SMTP_PASS_ARG="${1#*=}"; shift 1;;
     --password) SMTP_PASS_ARG="$2"; shift 2;;
+    --recipient=*) RECIPIENT_ARG="${1#*=}"; shift 1;;
+    --recipient) RECIPIENT_ARG="$2"; shift 2;;
     --*)
       echo "Unknown option: $1" >&2; usage; exit 2;;
     *)
@@ -203,9 +207,21 @@ echo "DDNS script finished with exit code $DDNS_EXIT_CODE."
 if [[ -n "$SMTP_HOST_ARG" && -n "$SMTP_USER_ARG" && -n "$SMTP_PASS_ARG" ]]; then
   echo "SMTP parameters provided. Preparing to send notification..."
 
-  # Construct the Apprise mailtos:// URL for SMTP with STARTTLS (port 587 is implicit)
-  MAIL_URL="mailtos://${SMTP_USER_ARG}:${SMTP_PASS_ARG}@${SMTP_HOST_ARG}"
+  # URL-encode username and password to handle special characters like '@', '#', etc.
+  ENCODED_USER=$(python -c "from urllib.parse import quote; print(quote('''${SMTP_USER_ARG}'''))")
+  ENCODED_PASS=$(python -c "from urllib.parse import quote; print(quote('''${SMTP_PASS_ARG}'''))")
 
+  # Construct the Apprise mailtos:// URL.
+  # To handle usernames containing '@', we explicitly set the 'from' address.
+  # This makes the URL structure unambiguous for the parser.
+  MAIL_URL="mailtos://${ENCODED_USER}:${ENCODED_PASS}@${SMTP_HOST_ARG}?from=${ENCODED_USER}"
+
+  # If a recipient is specified, add it to the URL. Otherwise, Apprise defaults
+  # to sending the email to the user specified in the URL (SMTP_USER_ARG).
+  if [ -n "$RECIPIENT_ARG" ]; then
+    # Append with '&' since 'from=' already exists
+    MAIL_URL="${MAIL_URL}&to=${RECIPIENT_ARG}"
+  fi
   # Check if we are in dry-run mode. The python script defaults to dry-run.
   # The env var DDNS_DRY_RUN must be '0' or 'false' to disable it.
   _env_dry=${DDNS_DRY_RUN:-1}
@@ -226,7 +242,16 @@ if [[ -n "$SMTP_HOST_ARG" && -n "$SMTP_USER_ARG" && -n "$SMTP_PASS_ARG" ]]; then
   NOTIFY_BODY="DDNS update for ${NAME_ARG:-$DDNS_DNS_NAME} finished with exit code $DDNS_EXIT_CODE.\n\n--- Execution Log ---\n$DDNS_OUTPUT"
 
   # Use the Apprise CLI to send the notification.
-  apprise --title "$NOTIFY_TITLE" --body "$NOTIFY_BODY" "$MAIL_URL"
+  # Add verbosity (-v) to see connection details and check the exit code.
+  echo "Attempting to send notification via Apprise..."
+  if notification_output=$(apprise -v --title "$NOTIFY_TITLE" --body "$NOTIFY_BODY" "$MAIL_URL" 2>&1); then
+    echo "Apprise notification sent successfully."
+    echo "$notification_output"
+  else
+    echo "ERROR: Apprise failed to send notification. See details below." >&2
+    echo "$notification_output" >&2
+    # Optionally exit with an error: exit 3
+  fi
 else
   echo "No notification parameters provided. Skipping notification."
 fi
