@@ -82,7 +82,9 @@ ARGS=()
 for arg in "$@"; do
   # If an argument contains a space, split it into two.
   # This handles cases from cron jobs where "--token value" is a single string.
-  if [[ "$arg" == *" "* ]]; then
+  if [[ "$arg" == *" "* ]] || [[ "$arg" == *"="* ]]; then
+    # Replace '=' with space and then split into array
+    arg="${arg//=/ }"
     # Use read -a to robustly split the argument into an array.
     read -r -a split_arg <<< "$arg"
     ARGS+=("${split_arg[@]}")
@@ -94,21 +96,14 @@ set -- "${ARGS[@]}"
 
 while [ ${#} -gt 0 ]; do
   case "$1" in
-    --token=*) TOKEN_ARG="${1#*=}"; shift 1;;
     --token|-t) TOKEN_ARG="$2"; shift 2;;
-    --zone=*) ZONE_ARG="${1#*=}"; shift 1;;
     --zone|-z) ZONE_ARG="$2"; shift 2;;
-    --name=*) NAME_ARG="${1#*=}"; shift 1;;
     --name|-n) NAME_ARG="$2"; shift 2;;
     --help|-h)
       usage; exit 0;;
-    --smtp=*) SMTP_HOST_ARG="${1#*=}"; shift 1;;
     --smtp) SMTP_HOST_ARG="$2"; shift 2;;
-    --username=*) SMTP_USER_ARG="${1#*=}"; shift 1;;
     --username) SMTP_USER_ARG="$2"; shift 2;;
-    --password=*) SMTP_PASS_ARG="${1#*=}"; shift 1;;
     --password) SMTP_PASS_ARG="$2"; shift 2;;
-    --recipient=*) RECIPIENT_ARG="${1#*=}"; shift 1;;
     --recipient) RECIPIENT_ARG="$2"; shift 2;;
     --*)
       echo "Unknown option: $1" >&2; usage; exit 2;;
