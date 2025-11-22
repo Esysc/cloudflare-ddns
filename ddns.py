@@ -1,3 +1,4 @@
+# pylint: disable=too-many-arguments
 """Simple DDNS updater for Cloudflare using the REST API.
 
 This script updates all A records for a given name in a Cloudflare zone to
@@ -12,7 +13,7 @@ import sys
 import argparse
 import logging
 from logging.handlers import RotatingFileHandler
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Union
 
 # Third-party imports
 import requests
@@ -44,7 +45,10 @@ LOG_FILE = os.getenv('DDNS_LOG_FILE', os.path.join(HERE, 'ddns.log'))
 LOG_LEVEL = os.getenv('DDNS_LOG_LEVEL', 'INFO').upper()
 
 logger = logging.getLogger('ddns')
+if logger.hasHandlers():
+    logger.handlers.clear()  # Clear existing handlers to avoid duplicates
 logger.setLevel(getattr(logging, LOG_LEVEL, logging.INFO))
+
 formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
 
 ch = logging.StreamHandler()
@@ -56,15 +60,70 @@ fh.setFormatter(formatter)
 logger.addHandler(fh)
 
 
+def generic_http_request(
+    method: str,
+    url: str,
+    params: Optional[Dict[str, Any]] = None,
+    data: Optional[Dict[str, Any]] = None,
+    headers: Optional[Dict[str, str]] = None,
+    timeout: int = 15,
+    expect_json: bool = True
+) -> Union[Dict[str, Any], str]:
+    """
+    Generic HTTP request function supporting JSON and raw text responses.
+
+    Args:
+        method: HTTP method as a string, e.g., 'GET', 'POST'
+        url: Full URL to send the request to
+        params: Query parameters for GET requests
+        data: JSON body for POST/PUT requests
+        headers: HTTP headers to include
+        timeout: Request timeout seconds
+        expect_json: If True, parse response as JSON; if False, return raw text
+
+    Returns:
+        Parsed JSON dict if expect_json is True, else response text string
+
+    Raises:
+        requests.RequestException on network or HTTP errors
+        ValueError if expected JSON but response is not valid JSON or Content-Type mismatch
+    """
+    req_headers = headers or {}
+    if expect_json and 'Accept' not in req_headers:
+        req_headers['Accept'] = 'application/json'
+
+    response = requests.request(
+        method=method,
+        url=url,
+        params=params,
+        json=data,
+        headers=req_headers,
+        timeout=timeout
+    )
+    response.raise_for_status()
+
+    if expect_json:
+        content_type = response.headers.get('Content-Type', '')
+        if 'application/json' not in content_type:
+            raise ValueError(f"Expected JSON response but got Content-Type: {content_type}")
+        try:
+            return response.json()
+        except ValueError as e:
+            raise ValueError("Response content is not valid JSON") from e
+    else:
+        return response.text.strip()
+
+
 def cf_get(path: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Perform a GET against the Cloudflare API and return JSON.
 
     Raises requests.RequestException on network errors.
     """
     url = f"{API_BASE}{path}"
-    r = requests.get(url, headers=HEADERS, params=params, timeout=15)
-    r.raise_for_status()
-    return r.json()
+    res = generic_http_request('GET', url, params=params, headers=HEADERS, timeout=15)
+    if not isinstance(res, dict):
+        raise ValueError("Expected JSON response as a dict but got something else")
+    return res
 
 
 def cf_patch(path: str, json_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -77,9 +136,10 @@ def cf_patch(path: str, json_data: Dict[str, Any]) -> Dict[str, Any]:
         )
         return {"success": True, "result": json_data}
     url = f"{API_BASE}{path}"
-    r = requests.patch(url, headers=HEADERS, json=json_data, timeout=15)
-    r.raise_for_status()
-    return r.json()
+    res = generic_http_request('PATCH', url, data=json_data, headers=HEADERS, timeout=15)
+    if not isinstance(res, dict):
+        raise ValueError("Expected JSON response as a dict but got something else")
+    return res
 
 
 def get_zone_id(zone_name: str) -> Optional[str]:
@@ -136,7 +196,10 @@ def get_public_ip() -> str:
 
     Raises on network failures.
     """
-    return requests.get('https://api.ipify.org', timeout=10).text.strip()
+    res = generic_http_request('GET', 'https://api.ipify.org', timeout=10, expect_json=False)
+    if not isinstance(res, str):
+        raise ValueError("Expected text response for public IP but got something else")
+    return res
 
 
 def main() -> int:
@@ -171,9 +234,9 @@ def main() -> int:
 
         # --- Main Logic ---
         records = get_dns_records(zone_id, dns_name, 'A')
-        if not records:
+        if not records or len(records) == 0:
             logger.info('No A record found for %s in zone %s', dns_name, zone_name)
-            return 0
+            return 1
 
         new_ip = get_public_ip()
         any_updated = False
