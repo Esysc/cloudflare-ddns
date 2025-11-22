@@ -98,7 +98,7 @@ There is a small test suite that validates argument/env validation for
 `ddns.py` without making network calls. Run it with:
 
 ```bash
-python3 -m unittest discover -v
+python3 -m unittest discover -v tests
 ```
 
 ## Deployment notes
