@@ -211,7 +211,14 @@ set -e
 echo "$DDNS_OUTPUT"
 
 echo "DDNS script finished with exit code $DDNS_EXIT_CODE."
-
+# --- Exit Code Handling ---
+# 0 -> Success, IP updated
+# 1 -> No A records found on Cloudflare
+# 2 -> CLOUDFLARE_API_TOKEN missing
+# 3 -> Generic Netwrork Errors
+# 4 -> Zone not found
+# 6 -> Zone and/or DNS name missing
+# 7 -> IP address is already up-to-date
 # Handle the special exit code for "up-to-date"
 if [ "$DDNS_EXIT_CODE" -eq 7 ]; then
   echo "IP address is already up-to-date. No notification will be sent."
