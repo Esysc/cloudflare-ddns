@@ -45,7 +45,10 @@ LOG_FILE = os.getenv('DDNS_LOG_FILE', os.path.join(HERE, 'ddns.log'))
 LOG_LEVEL = os.getenv('DDNS_LOG_LEVEL', 'INFO').upper()
 
 logger = logging.getLogger('ddns')
+if logger.hasHandlers():
+    logger.handlers.clear()  # Clear existing handlers to avoid duplicates
 logger.setLevel(getattr(logging, LOG_LEVEL, logging.INFO))
+
 formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
 
 ch = logging.StreamHandler()
@@ -231,9 +234,9 @@ def main() -> int:
 
         # --- Main Logic ---
         records = get_dns_records(zone_id, dns_name, 'A')
-        if not records:
+        if not records or len(records) == 0:
             logger.info('No A record found for %s in zone %s', dns_name, zone_name)
-            return 0
+            return 1
 
         new_ip = get_public_ip()
         any_updated = False

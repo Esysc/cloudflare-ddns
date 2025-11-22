@@ -1,142 +1,200 @@
-"""
-Tests for the main logic of the ddns.py script, using mocks to isolate
-from network operations.
-"""
-# Standard library imports
+"""Unit tests covering the main logic of the ddns.py script."""
+
 import os
 import sys
 import unittest
-from unittest.mock import patch
-
-# Add the parent directory to the path to allow importing 'ddns'
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
-import ddns  # pylint: disable=import-error,wrong-import-position
+from unittest.mock import patch, Mock
+import importlib
 
 
 class TestMainLogic(unittest.TestCase):
-    """Test the main function's logic flows and exit codes."""
+    """Test cases for the ddns.py main function."""
 
     def setUp(self):
-        """Set common environment variables for all tests in this class."""
-        os.environ['CLOUDFLARE_API_TOKEN'] = 'fake-token'
-        os.environ['DDNS_ZONE_NAME'] = 'example.com'
-        os.environ['DDNS_DNS_NAME'] = 'host.example.com'
-        # Ensure we are not in dry-run mode for these tests to check update calls
-        os.environ['DDNS_DRY_RUN'] = '0'
+        """Set environment and reload ddns module before each test."""
+        self.env_patcher = patch.dict(
+            os.environ,
+            {
+                'CLOUDFLARE_API_TOKEN': 'fake-token',
+                'DDNS_ZONE_NAME': 'example.com',
+                'DDNS_DNS_NAME': 'host.example.com',
+                'DDNS_DRY_RUN': '0',
+            },
+            clear=True,
+        )
+        self.env_patcher.start()
+        self.ddns = importlib.reload(importlib.import_module("ddns"))
 
     def tearDown(self):
-        """Clean up environment variables after tests."""
-        del os.environ['CLOUDFLARE_API_TOKEN']
-        del os.environ['DDNS_ZONE_NAME']
-        del os.environ['DDNS_DNS_NAME']
-        del os.environ['DDNS_DRY_RUN']
+        """Remove environment patch after each test."""
+        self.env_patcher.stop()
 
-    @patch('ddns.update_a_record')
-    @patch('ddns.get_public_ip', return_value='192.0.2.100')
-    @patch('ddns.get_dns_records')
-    @patch('ddns.get_zone_id', return_value='fake-zone-id')
-    def test_main_record_needs_update(
-        self, mock_get_zone_id, mock_get_dns_records, mock_get_public_ip, mock_update_a_record
-    ):
-        """Verify main() updates a record and returns exit code 0."""
-        # Arrange: Mock get_dns_records to return a record with a different IP
-        mock_get_dns_records.return_value = [
-            {'id': 'rec-123', 'name': 'host.example.com', 'content': '192.0.2.1'}
-        ]
-
-        # Act: Run the main function, mocking sys.argv to prevent it from
-        # parsing the unittest runner's arguments.
-        with patch.object(sys, 'argv', ['ddns.py']):
+    def test_main_record_needs_update(self):
+        """Test main() updates record when IP differs."""
+        ddns = self.ddns
+        with patch.object(ddns, 'update_a_record') as mock_update, \
+             patch.object(ddns, 'get_public_ip', return_value='192.0.2.100'), \
+             patch.object(
+                 ddns,
+                 'get_dns_records',
+                 return_value=[{'id': 'rec-123', 'content': '192.0.2.1'}]
+             ), \
+             patch.object(ddns, 'get_zone_id', return_value='fake-zone-id'), \
+             patch.object(sys, 'argv', ['ddns.py']):
             exit_code = ddns.main()
+            self.assertEqual(exit_code, 0)
+            mock_update.assert_called_once_with('fake-zone-id', 'rec-123', '192.0.2.100')
 
-        # Assert
-        self.assertEqual(exit_code, 0)
-        mock_get_zone_id.assert_called_once_with('example.com')  # type: ignore # pylint: disable=line-too-long
-        mock_get_dns_records.assert_called_once_with(
-            'fake-zone-id', 'host.example.com', 'A'
-        )  # type: ignore
-        mock_get_public_ip.assert_called_once()  # type: ignore
-        # Verify that the update function was called with the correct parameters
-        mock_update_a_record.assert_called_once_with(
-            'fake-zone-id', 'rec-123', '192.0.2.100'
-        )  # type: ignore
-
-    @patch('ddns.update_a_record')
-    @patch('ddns.get_public_ip', return_value='192.0.2.1')
-    @patch('ddns.get_dns_records')
-    @patch('ddns.get_zone_id', return_value='fake-zone-id')
-    def test_main_record_already_up_to_date(
-        self, mock_get_zone_id, mock_get_dns_records, mock_get_public_ip, mock_update_a_record
-    ):
-        """Verify main() does nothing and returns exit code 7 if IP is current."""
-        # Arrange: Mock get_dns_records to return a record with the same IP
-        mock_get_dns_records.return_value = [
-            {'id': 'rec-123', 'name': 'host.example.com', 'content': '192.0.2.1'}
-        ]
-
-        # Act: Run the main function, mocking sys.argv.
-        with patch.object(sys, 'argv', ['ddns.py']):
+    def test_main_record_already_up_to_date(self):
+        """Test main() returns up-to-date exit code when IP matches."""
+        ddns = self.ddns
+        with patch.object(ddns, 'update_a_record') as mock_update, \
+             patch.object(ddns, 'get_public_ip', return_value='192.0.2.1'), \
+             patch.object(
+                 ddns,
+                 'get_dns_records',
+                 return_value=[{'id': 'rec-123', 'content': '192.0.2.1'}]
+             ), \
+             patch.object(ddns, 'get_zone_id', return_value='fake-zone-id'), \
+             patch.object(sys, 'argv', ['ddns.py']):
             exit_code = ddns.main()
+            self.assertEqual(exit_code, 7)
+            mock_update.assert_not_called()
 
-        # Assert
-        self.assertEqual(exit_code, 7)
-        mock_get_zone_id.assert_called_once_with('example.com')  # type: ignore
-        mock_get_dns_records.assert_called_once_with( # type: ignore
-            'fake-zone-id',
-            'host.example.com',
-            'A'
-        )
-        mock_get_public_ip.assert_called_once()  # type: ignore
-        # Verify that the update function was NOT called
-        mock_update_a_record.assert_not_called()  # type: ignore
-
-    @patch(
-        'ddns.get_public_ip',
-        side_effect=ddns.requests.exceptions.RequestException(
-            "Connection failed"
-        )
-    )
-    @patch('ddns.get_dns_records')
-    @patch('ddns.get_zone_id', return_value='fake-zone-id')
-    def test_main_network_error_returns_3(
-        self,
-        _mock_get_zone_id,
-        _mock_get_dns_records,
-        mock_get_public_ip
-    ):
-        """Verify main() returns exit code 3 on a network error."""
-        # Arrange: Mocks are set up. get_public_ip will raise an exception.
-
-        # Act: Run the main function.
-        with patch.object(sys, 'argv', ['ddns.py']):
+    def test_main_network_error_returns_3(self):
+        """Test main() returns network error exit code on exception."""
+        ddns = self.ddns
+        with patch.object(
+                ddns,
+                'get_public_ip',
+                side_effect=ddns.requests.exceptions.RequestException("fail")
+             ), \
+             patch.object(ddns, 'get_dns_records', return_value=[{'id': 'rec-123'}]), \
+             patch.object(ddns, 'get_zone_id', return_value='fake-zone-id'), \
+             patch.object(sys, 'argv', ['ddns.py']):
             exit_code = ddns.main()
+            self.assertEqual(exit_code, 3)
 
-        # Assert
-        self.assertEqual(exit_code, 3)
-        # Ensure we tried to get the IP, which is where the error occurs
-        mock_get_public_ip.assert_called_once()  # type: ignore
+    def test_main_dry_run_does_not_update(self):
+        """Test main() does not call patch request during dry run."""
+        ddns = self.ddns
+        with patch.dict(os.environ, {'DDNS_DRY_RUN': '1'}, clear=False):
+            importlib.reload(ddns)
+            with patch.object(ddns.requests, 'patch') as mock_patch, \
+                 patch.object(ddns, 'get_public_ip', return_value='192.0.2.100'), \
+                 patch.object(
+                 ddns,
+                 'get_dns_records',
+                 return_value=[{'id': 'rec-123', 'content': '192.0.2.1'}]
+                 ), \
+                 patch.object(ddns, 'get_zone_id', return_value='fake-zone-id'), \
+                 patch.object(sys, 'argv', ['ddns.py']):
+                exit_code = ddns.main()
+                self.assertEqual(exit_code, 0)
+                mock_patch.assert_not_called()
 
-    @patch('ddns.requests.patch')  # Patch the underlying requests.patch call
-    @patch('ddns.get_public_ip', return_value='192.0.2.100')
-    @patch('ddns.get_dns_records')
-    @patch('ddns.get_zone_id', return_value='fake-zone-id')
-    def test_main_dry_run_does_not_update(
-        self, _mock_get_zone_id, mock_get_dns_records, _mock_get_public_ip, mock_requests_patch
-    ):
-        """Verify main() does not attempt a real update when DRY_RUN is active."""
-        # Arrange: Set DDNS_DRY_RUN to '1' to enable dry-run mode.
-        # We need to reload the module for the module-level DRY_RUN constant to update.
-        os.environ['DDNS_DRY_RUN'] = '1'
-        mock_get_dns_records.return_value = [
-            {'id': 'rec-123', 'name': 'host.example.com', 'content': '192.0.2.1'}
-        ]
-
-        # Act: Run the main function.
-        with patch.object(sys, 'argv', ['ddns.py']):
+    def test_main_zone_not_found_returns_4(self):
+        """Test main() returns exit code for missing zone."""
+        ddns = self.ddns
+        with patch.object(ddns, 'get_zone_id', return_value=None), \
+             patch.object(sys, 'argv', ['ddns.py']):
             exit_code = ddns.main()
+            self.assertEqual(exit_code, 4)
 
-        # Assert
-        self.assertEqual(exit_code, 0, "Exit code should be 0 for a successful dry-run update.")
-        # Verify that the underlying `requests.patch` function was NEVER called.
-        mock_requests_patch.assert_not_called()
+    def test_main_no_dns_records_returns_1(self):
+        """Test main() returns exit code when no DNS A records found."""
+        ddns = self.ddns
+        with patch.object(ddns, 'get_zone_id', return_value='fake-zone-id'), \
+             patch.object(ddns, 'get_dns_records', return_value=[]), \
+             patch.object(sys, 'argv', ['ddns.py']):
+            exit_code = ddns.main()
+            self.assertEqual(exit_code, 1)
+
+    def test_main_missing_env_vars_returns_2_and_6(self):
+        """Test various missing environment variable scenarios."""
+        ddns_mod = importlib.import_module("ddns")
+
+        with patch.dict(os.environ, {}, clear=True):
+            importlib.reload(ddns_mod)
+            with patch.object(sys, 'argv', ['ddns.py']):
+                self.assertEqual(ddns_mod.main(), 2)
+
+        with patch.dict(os.environ, {'CLOUDFLARE_API_TOKEN': 'token'}, clear=True):
+            importlib.reload(ddns_mod)
+            with patch.object(sys, 'argv', ['ddns.py']):
+                self.assertEqual(ddns_mod.main(), 6)
+
+        with patch.dict(os.environ, {'CLOUDFLARE_API_TOKEN': 'token',
+                                    'DDNS_ZONE_NAME': 'zone'}, clear=True):
+            importlib.reload(ddns_mod)
+            with patch.object(sys, 'argv', ['ddns.py']):
+                self.assertEqual(ddns_mod.main(), 6)
+
+
+class TestGenericHttpRequest(unittest.TestCase):
+    """Test generic_http_request handling JSON and text methods."""
+
+    def setUp(self):
+        self.env_patcher = patch.dict(os.environ, {
+            'CLOUDFLARE_API_TOKEN': 'fake-token',
+        }, clear=True)
+        self.env_patcher.start()
+        self.ddns = importlib.reload(importlib.import_module("ddns"))
+
+    def tearDown(self):
+        self.env_patcher.stop()
+
+    def test_json_response_success(self):
+        """Test JSON response is correctly parsed."""
+        ddns = self.ddns
+        with patch.object(ddns.requests, 'request') as mock_request:
+            mock_resp = Mock()
+            mock_resp.raise_for_status = Mock()
+            mock_resp.headers = {'Content-Type': 'application/json'}
+            mock_resp.json.return_value = {'key': 'value'}
+            mock_request.return_value = mock_resp
+
+            result = ddns.generic_http_request('GET', 'http://fakeurl', expect_json=True)
+            self.assertEqual(result, {'key': 'value'})
+
+    def test_json_response_invalid_json_raises(self):
+        """Test invalid JSON response raises ValueError."""
+        ddns = self.ddns
+        with patch.object(ddns.requests, 'request') as mock_request:
+            mock_resp = Mock()
+            mock_resp.raise_for_status = Mock()
+            mock_resp.headers = {'Content-Type': 'application/json'}
+            mock_resp.json.side_effect = ValueError("Invalid JSON")
+            mock_request.return_value = mock_resp
+
+            with self.assertRaises(ValueError):
+                ddns.generic_http_request('GET', 'http://fakeurl', expect_json=True)
+
+    def test_json_response_wrong_content_type_raises(self):
+        """Test wrong content-type raises ValueError on JSON expectation."""
+        ddns = self.ddns
+        with patch.object(ddns.requests, 'request') as mock_request:
+            mock_resp = Mock()
+            mock_resp.raise_for_status = Mock()
+            mock_resp.headers = {'Content-Type': 'text/html'}
+            mock_request.return_value = mock_resp
+
+            with self.assertRaises(ValueError):
+                ddns.generic_http_request('GET', 'http://fakeurl', expect_json=True)
+
+    def test_text_response_success(self):
+        """Test plain text response is returned correctly. """
+        ddns = self.ddns
+        with patch.object(ddns.requests, 'request') as mock_request:
+            mock_resp = Mock()
+            mock_resp.raise_for_status = Mock()
+            mock_resp.headers = {'Content-Type': 'text/plain'}
+            mock_resp.text = 'plain response text'
+            mock_request.return_value = mock_resp
+
+            result = ddns.generic_http_request('GET', 'http://fakeurl', expect_json=False)
+            self.assertEqual(result, 'plain response text')
+
+
+if __name__ == '__main__':
+    unittest.main()
